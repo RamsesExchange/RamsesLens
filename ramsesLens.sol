@@ -7,6 +7,7 @@ import "./interfaces/IVoter.sol";
 import "./interfaces/IPair.sol";
 import "./interfaces/IRam.sol";
 import "./ProxyImplementation.sol";
+import "./interfaces/IGauge.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /*
@@ -124,6 +125,8 @@ contract RamsesLens is ProxyImplementation {
     /**************************************************
      *                  Protocol data
      **************************************************/
+
+     //@notice Returns core contract addresses of the protocol.
     function protocolMetadata()
         external
         view
@@ -140,20 +143,23 @@ contract RamsesLens is ProxyImplementation {
             });
     }
 
+    //@notice Returns the total number of pools. Note: only returns the number of pools with gauges, not the absolute total.
     function poolsLength() public view returns (uint256) {
         return voter.length();
     }
 
+    //@notice Returns the addresses of all pools. Note: only returns the pools with gauges, not the absolute total.
     function poolsAddresses() public view returns (address[] memory) {
         uint256 _poolsLength = poolsLength();
         address[] memory _poolsAddresses = new address[](_poolsLength);
-        for (uint256 poolIndex; poolIndex < _poolsLength; poolIndex++) {
+        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
             address poolAddress = voter.pools(poolIndex);
             _poolsAddresses[poolIndex] = poolAddress;
         }
         return _poolsAddresses;
     }
 
+    //@notice Returns useful information for `poolAddress`.
     function poolInfo(address poolAddress)
         public
         view
@@ -165,7 +171,7 @@ contract RamsesLens is ProxyImplementation {
         address gaugeAddress = voter.gauges(poolAddress);
         address bribeAddress = voter.bribes(gaugeAddress);
         address[]
-            memory _bribeTokensAddresses = bribeTokensAddressesByBribeAddress(
+            memory _bribeTokensAddresses = tokensForBribe(
                 bribeAddress
             );
         if (_bribeTokensAddresses.length < 2) {
@@ -187,6 +193,7 @@ contract RamsesLens is ProxyImplementation {
             });
     }
 
+    //@notice Returns useful information for all pools.
     function poolsInfo() external view returns (IRamsesLens.Pool[] memory) {
         address[] memory _poolsAddresses = poolsAddresses();
         IRamsesLens.Pool[] memory pools = new IRamsesLens.Pool[](
@@ -195,7 +202,7 @@ contract RamsesLens is ProxyImplementation {
         for (
             uint256 poolIndex;
             poolIndex < _poolsAddresses.length;
-            poolIndex++
+            ++poolIndex
         ) {
             address poolAddress = _poolsAddresses[poolIndex];
             IRamsesLens.Pool memory _poolInfo = poolInfo(poolAddress);
@@ -204,6 +211,7 @@ contract RamsesLens is ProxyImplementation {
         return pools;
     }
 
+    //@notice returns all existing gauges.
     function gaugesAddresses() public view returns (address[] memory) {
         address[] memory _poolsAddresses = poolsAddresses();
         address[] memory _gaugesAddresses = new address[](
@@ -212,7 +220,7 @@ contract RamsesLens is ProxyImplementation {
         for (
             uint256 poolIndex;
             poolIndex < _poolsAddresses.length;
-            poolIndex++
+            ++poolIndex
         ) {
             address poolAddress = _poolsAddresses[poolIndex];
             address gaugeAddress = voter.gauges(poolAddress);
@@ -221,12 +229,13 @@ contract RamsesLens is ProxyImplementation {
         return _gaugesAddresses;
     }
 
+    //@notice returns all existing bribe addresses.
     function bribesAddresses() public view returns (address[] memory) {
         address[] memory _gaugesAddresses = gaugesAddresses();
         address[] memory _bribesAddresses = new address[](
             _gaugesAddresses.length
         );
-        for (uint256 gaugeIdx; gaugeIdx < _gaugesAddresses.length; gaugeIdx++) {
+        for (uint256 gaugeIdx; gaugeIdx < _gaugesAddresses.length; ++gaugeIdx) {
             address gaugeAddress = _gaugesAddresses[gaugeIdx];
             address bribeAddress = voter.bribes(gaugeAddress);
             _bribesAddresses[gaugeIdx] = bribeAddress;
@@ -234,7 +243,8 @@ contract RamsesLens is ProxyImplementation {
         return _bribesAddresses;
     }
 
-    function bribeTokensAddressesByBribeAddress(address bribeAddress)
+    //@notice Returns the current bribe tokens for `bribeAddress`.
+    function tokensForBribe(address bribeAddress)
         public
         view
         returns (address[] memory)
@@ -246,7 +256,7 @@ contract RamsesLens is ProxyImplementation {
         for (
             uint256 bribeTokenIdx;
             bribeTokenIdx < bribeTokensLength;
-            bribeTokenIdx++
+             ++bribeTokenIdx
         ) {
             address bribeTokenAddress = IFeeDistributor(bribeAddress).rewards(
                 bribeTokenIdx
@@ -256,6 +266,7 @@ contract RamsesLens is ProxyImplementation {
         return _bribeTokensAddresses;
     }
 
+    //@notice Returns all LP balances of `accountAddress` with support for batching by pool index.
     function poolsPositionsOf(
         address accountAddress,
         uint256 startIndex,
@@ -268,11 +279,8 @@ contract RamsesLens is ProxyImplementation {
             );
         uint256 positionsLength;
         endIndex = Math.min(endIndex, _poolsLength);
-        for (
-            uint256 poolIndex = startIndex;
-            poolIndex < endIndex;
-            poolIndex++
-        ) {
+        for (uint256 poolIndex = startIndex; poolIndex < endIndex; ++poolIndex) {
+            
             address poolAddress = voter.pools(poolIndex);
             uint256 balanceOf = IPair(poolAddress).balanceOf(
                 accountAddress
@@ -293,6 +301,7 @@ contract RamsesLens is ProxyImplementation {
         return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
     }
 
+    //@notice Returns all LP balances of `accountAddress`.
     function poolsPositionsOf(address accountAddress)
         public
         view
@@ -306,7 +315,7 @@ contract RamsesLens is ProxyImplementation {
 
         uint256 positionsLength;
 
-        for (uint256 poolIndex; poolIndex < _poolsLength; poolIndex++) {
+        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
             address poolAddress = voter.pools(poolIndex);
             uint256 balanceOf = IPair(poolAddress).balanceOf(
                 accountAddress
@@ -327,6 +336,77 @@ contract RamsesLens is ProxyImplementation {
         return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
     }
 
+    //@notice Returns all staked lp's of `accountAddress`.
+    function gaugesPositionsOf(address accountAddress) public view returns (IRamsesLens.PositionPool[] memory) {
+
+        uint256 _poolsLength = poolsLength();
+        IRamsesLens.PositionPool[]
+            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
+                _poolsLength
+            );
+
+        uint256 positionsLength;
+
+        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
+            address poolAddress = voter.pools(poolIndex);
+            address gaugeAddress = voter.gauges(poolAddress);
+            uint256 balanceOf = IGauge(gaugeAddress).balanceOf(
+                accountAddress
+            );
+            if (balanceOf > 0) {
+                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
+                    id: poolAddress,
+                    balanceOf: balanceOf
+                });
+                ++positionsLength;
+            }
+        }
+
+        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
+        assembly {
+            mstore(add(encodedPositions, 0x40), positionsLength)
+        }
+        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
+    }
+
+    //@notice Returns all staked lp's of `accountAddress` with support for batching by pool index.
+    function gaugesPositionsOf(
+        address accountAddress,
+        uint256 startIndex,
+        uint256 endIndex
+    ) public view returns (IRamsesLens.PositionPool[] memory) {
+        uint256 _poolsLength = poolsLength();
+        IRamsesLens.PositionPool[]
+            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
+                _poolsLength
+            );
+        uint256 positionsLength;
+        endIndex = Math.min(endIndex, _poolsLength);
+        for (uint256 poolIndex = startIndex; poolIndex < endIndex; ++poolIndex) {
+            
+            address poolAddress = voter.pools(poolIndex);
+            address gaugeAddress = voter.gauges(poolAddress);
+            uint256 balanceOf = IGauge(gaugeAddress).balanceOf(
+                accountAddress
+            );
+            if (balanceOf > 0) {
+                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
+                    id: poolAddress,
+                    balanceOf: balanceOf
+                });
+                positionsLength++;
+            }
+        }
+
+        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
+        assembly {
+            mstore(add(encodedPositions, 0x40), positionsLength)
+        }
+        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
+    }
+
+
+    //@notice returns all veNFT id's of `accountAddress`.
     function veTokensIdsOf(address accountAddress)
         public
         view
@@ -335,14 +415,15 @@ contract RamsesLens is ProxyImplementation {
         uint256 veBalanceOf = ve.balanceOf(accountAddress);
         uint256[] memory _veTokensOf = new uint256[](veBalanceOf);
 
-        for (uint256 tokenIdx; tokenIdx < veBalanceOf; tokenIdx++) {
+        for (uint256 tokenIdx; tokenIdx < veBalanceOf; ++tokenIdx) {
             uint256 tokenId = ve.tokenOfOwnerByIndex(accountAddress, tokenIdx);
             _veTokensOf[tokenIdx] = tokenId;
         }
         return _veTokensOf;
     }
 
-    function gaugeAddressByPoolAddress(address poolAddress)
+    //@notice Returns gauge address of `poolAddress`
+    function gaugeForPool(address poolAddress)
         external
         view
         returns (address)
@@ -350,7 +431,8 @@ contract RamsesLens is ProxyImplementation {
         return voter.gauges(poolAddress);
     }
 
-    function bribeAddresByPoolAddress(address poolAddress)
+    //@notice returns bribe address of `poolAddress
+    function bribeForPool(address poolAddress)
         public
         view
         returns (address)
@@ -360,22 +442,24 @@ contract RamsesLens is ProxyImplementation {
         return bribeAddress;
     }
 
-    function bribeTokensAddressesByPoolAddress(address poolAddress)
+    //@notice Returns bribe tokens by `poolAddress`
+    function bribeTokensForPool(address poolAddress)
         public
         view
         returns (address[] memory)
     {
-        address bribeAddress = bribeAddresByPoolAddress(poolAddress);
-        return bribeTokensAddressesByBribeAddress(bribeAddress);
+        address bribeAddress = bribeForPool(poolAddress);
+        return tokensForBribe(bribeAddress);
     }
 
+    //@notice Returns the amount of bribes earned by `tokenId` for `poolAddress`.
     function bribesPositionsOf(
         address poolAddress,
         uint256 tokenId
     ) public view returns (IRamsesLens.PositionBribe[] memory) {
-        address bribeAddress = bribeAddresByPoolAddress(poolAddress);
+        address bribeAddress = bribeForPool(poolAddress);
         address[]
-            memory bribeTokensAddresses = bribeTokensAddressesByBribeAddress(
+            memory bribeTokensAddresses = tokensForBribe(
                 bribeAddress
             );
         IRamsesLens.PositionBribe[]
@@ -386,7 +470,7 @@ contract RamsesLens is ProxyImplementation {
         for (
             uint256 bribeTokenIdx;
             bribeTokenIdx < bribeTokensAddresses.length;
-            bribeTokenIdx++
+            ++bribeTokenIdx
         ) {
             address bribeTokenAddress = bribeTokensAddresses[bribeTokenIdx];
             uint256 earned = IFeeDistributor(bribeAddress).earned(
@@ -412,6 +496,7 @@ contract RamsesLens is ProxyImplementation {
         return filteredBribes;
     }
 
+    //@notice Returns the amount of bribes earned by `accountAddress` for `poolAddress`.
     function bribesPositionsOf(address accountAddress, address poolAddress)
         public
         view
@@ -428,7 +513,7 @@ contract RamsesLens is ProxyImplementation {
         for (
             uint256 veTokenIdIdx;
             veTokenIdIdx < veTokensIds.length;
-            veTokenIdIdx++
+            ++veTokenIdIdx
         ) {
             uint256 tokenId = veTokensIds[veTokenIdIdx];
             _bribePositionsOf[currentIdx] = IRamsesLens
@@ -444,6 +529,7 @@ contract RamsesLens is ProxyImplementation {
         return _bribePositionsOf;
     }
 
+    //@notice Returns all veNFT positions of `accountAddress`
     function vePositionsOf(address accountAddress)
         public
         view
@@ -453,7 +539,7 @@ contract RamsesLens is ProxyImplementation {
         IRamsesLens.PositionVe[]
             memory _vePositionsOf = new IRamsesLens.PositionVe[](veBalanceOf);
 
-        for (uint256 tokenIdx; tokenIdx < veBalanceOf; tokenIdx++) {
+        for (uint256 tokenIdx; tokenIdx < veBalanceOf; ++tokenIdx) {
             uint256 tokenId = ve.tokenOfOwnerByIndex(accountAddress, tokenIdx);
             uint256 balanceOf = ve.balanceOfNFT(tokenId);
             uint256 locked = ve.locked(tokenId);
