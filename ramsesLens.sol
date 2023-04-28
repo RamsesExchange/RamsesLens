@@ -95,6 +95,10 @@ contract ramsesLens is Initializable {
         userBribeData[] bribeRewards;
         userVeData[] veNFTData;
     }
+    
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(IVoter _voter, address _router) initializer external {
         voter = _voter;
