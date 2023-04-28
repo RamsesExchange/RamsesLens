@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.17;
+pragma solidity 0.8.19;
 
 interface IFeeDistributor {
-    function earned(address, uint256) external view returns (uint256);
     function getRewardTokens() external view returns (address[] memory);
-    function rewards(uint256) external view returns (address);
+    function earned(address token, uint tokenId) external view returns (uint reward);
 }
