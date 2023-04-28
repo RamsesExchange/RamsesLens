@@ -1,56 +1,32 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.17;
-import "./interfaces/IRamsesLens.sol";
-import "./interfaces/IVotingEscrow.sol";
-import "./interfaces/IFeeDistributor.sol";
+pragma solidity 0.8.19;
+
+import "./interfaces/IPairFactory.sol";
 import "./interfaces/IVoter.sol";
+import "./interfaces/IVotingEscrow.sol";
+import "./interfaces/IMinter.sol";
 import "./interfaces/IPair.sol";
-import "./interfaces/IRam.sol";
-import "./ProxyImplementation.sol";
+import "./interfaces/IFeeDistributor.sol";
 import "./interfaces/IGauge.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
-/*
-@title RamsesLens
-@author 0xDAO-fi, Ramses Exchange
-@notice Fork of SolidlyLens optimized for Ramses Exchange
-*/
+contract ramsesLens is Initializable {
+    IVoter voter;
+    IVotingEscrow ve;
+    IMinter minter;
 
+    address public router; // router address
 
-/**************************************************
- *                   Interfaces
- **************************************************/
-
-interface IMinter {
-    function _ve_dist() external view returns (address);
-}
-
-/**************************************************
- *                 Core contract
- **************************************************/
-contract RamsesLens is ProxyImplementation {
-    address public veAddress;
-    address public ownerAddress;
-
-    // Internal interfaces
-    IVoter internal voter;
-    IMinter internal minter;
-    IVotingEscrow internal ve;
-    IRam internal ram;
-
-    /**************************************************
-     *                   Structs
-     **************************************************/
     struct Pool {
         address id;
         string symbol;
         bool stable;
-        address token0Address;
-        address token1Address;
-        address gaugeAddress;
-        address bribeAddress;
-        address[] bribeTokensAddresses;
-        address fees;
+        address token0;
+        address token1;
+        address gauge;
+        address feeDistributor;
+        address pairFees;
+        uint pairBps;
     }
 
     struct ProtocolMetadata {
@@ -61,72 +37,117 @@ contract RamsesLens is ProxyImplementation {
         address gaugesFactoryAddress;
         address minterAddress;
     }
+    
+    struct vePosition {
+        uint256 tokenId;
+        uint256 balanceOf;
+        uint256 locked;
+    }
 
-    /**************************************************
-     *                   Configuration
-     **************************************************/
+    struct tokenRewardData {
+        address token;
+        uint rewardRate;
+    }
+
+    struct gaugeRewardsData {
+        address gauge;
+        tokenRewardData[] rewardData;
+    }
+
+    // user earned per token
+    struct userGaugeTokenData {
+        address token;
+        uint earned;
+    }
+
+    struct userGaugeRewardData {
+        address gauge;
+        uint balance;
+        uint derivedBalance;
+        userGaugeTokenData[] userRewards;
+    }
+
+    // user earned per token for feeDist
+    struct userBribeTokenData {
+        address token;
+        uint earned;
+    }
+
+    struct userFeeDistData {
+        address feeDistributor;
+        userBribeTokenData[] bribeData;
+    }
+    // the amount of nested structs for bribe lmao
+    struct userBribeData {
+        uint tokenId;
+        userFeeDistData[] feeDistRewards;
+    }
+
+    struct userVeData {
+        uint tokenId;
+        uint lockedAmount;
+        uint votingPower;
+        uint lockEnd;
+    }
+
+    struct userData {
+        userGaugeRewardData[] gaugeRewards;
+        userBribeData[] bribeRewards;
+        userVeData[] veNFTData;
+    }
+
+    function initialize(IVoter _voter, address _router) initializer external {
+        voter = _voter;
+        router = _router;
+        ve = IVotingEscrow(voter._ve());
+        minter = IMinter(voter.minter());
+    }
 
     /**
-     * @notice Initialize proxy storage
-     */
-    function initializeProxyStorage(address _veAddress)
-        public
-        checkProxyInitialized
-    {
-        veAddress = _veAddress;
-        ownerAddress = msg.sender;
-        ve = IVotingEscrow(veAddress);
-        ram = IRam(ve.token());
-        voter = IVoter(ve.voter());
-        minter = IMinter(ram.minter());
+    * @notice returns the pool factory address
+    */
+    function poolFactory() public view returns (address pool) {
+        pool = voter.factory();
     }
 
-    function setVeAddress(address _veAddress) external {
-        require(msg.sender == ownerAddress, "Only owner");
-        veAddress = _veAddress;
+    /**
+    * @notice returns the gauge factory address
+    */
+    function gaugeFactory() public view returns (address _gaugeFactory) {
+        _gaugeFactory = voter.gaugefactory();
     }
 
-    function setOwnerAddress(address _ownerAddress) external {
-        require(msg.sender == ownerAddress, "Only owner");
-        ownerAddress = _ownerAddress;
+    /**
+    * @notice returns ram address
+    */
+    function ramAddress() public view returns (address ram) {
+        ram = ve.token();
     }
 
-    /**************************************************
-     *                 Protocol addresses
-     **************************************************/
-    function voterAddress() public view returns (address) {
-        return ve.voter();
+    /**
+    * @notice returns the voter address
+    */
+    function voterAddress() public view returns (address _voter) {
+        _voter = address(voter);
     }
 
-    function poolsFactoryAddress() public view returns (address) {
-        return voter.factory();
+    /**
+    * @notice returns rewardsDistributor address
+    */
+    function rewardsDistributor() public view returns (address _rewardsDistributor) {
+        _rewardsDistributor = minter._rewards_distributor();
     }
 
-    function gaugesFactoryAddress() public view returns (address) {
-        return voter.gaugefactory();
+    /**
+    * @notice returns the minter address
+    */
+    function minterAddress() public view returns (address _minter) {
+        _minter = address(minter);
     }
 
-    function ramAddress() public view returns (address) {
-        return ve.token();
-    }
-
-    function routerAddress() public view returns (address) {
-        return ram.router();
-    }
-
-    function veDistAddress() public view returns (address) {
-        return minter._ve_dist();
-    }
-
-    function minterAddress() public view returns (address) {
-        return ram.minter();
-    }
-
-    /**************************************************
-     *                  Protocol data
-     **************************************************/
-
-     //@notice Returns core contract addresses of the protocol.
+    /**
+    * @notice returns Ramses core contract addresses
+    */
     function protocolMetadata()
         external
         view
@@ -134,421 +155,399 @@ contract RamsesLens is ProxyImplementation {
     {
         return
             ProtocolMetadata({
-                veAddress: veAddress,
+                veAddress: voter._ve(),
                 voterAddress: voterAddress(),
                 ramAddress: ramAddress(),
-                poolsFactoryAddress: poolsFactoryAddress(),
-                gaugesFactoryAddress: gaugesFactoryAddress(),
+                poolsFactoryAddress: poolFactory(),
+                gaugesFactoryAddress: gaugeFactory(),
                 minterAddress: minterAddress()
             });
     }
 
-    //@notice Returns the total number of pools. Note: only returns the number of pools with gauges, not the absolute total.
-    function poolsLength() public view returns (uint256) {
-        return voter.length();
-    }
+    /**
+    * @notice returns all Ramses pool addresses
+    */
+    function allPools() public view returns (address[] memory pools) {
+        IPairFactory _factory = IPairFactory(poolFactory());
+        uint len = _factory.allPairsLength();
 
-    //@notice Returns the addresses of all pools. Note: only returns the pools with gauges, not the absolute total.
-    function poolsAddresses() public view returns (address[] memory) {
-        uint256 _poolsLength = poolsLength();
-        address[] memory _poolsAddresses = new address[](_poolsLength);
-        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
-            address poolAddress = voter.pools(poolIndex);
-            _poolsAddresses[poolIndex] = poolAddress;
+        pools = new address[](len);
+        for(uint i; i < len; ++i) {
+            pools[i] = _factory.allPairs(i);
         }
-        return _poolsAddresses;
     }
 
-    //@notice Returns useful information for `poolAddress`.
-    function poolInfo(address poolAddress)
-        public
-        view
-        returns (IRamsesLens.Pool memory)
-    {
-        IPair pool = IPair(poolAddress);
-        address token0Address = pool.token0();
-        address token1Address = pool.token1();
-        address gaugeAddress = voter.gauges(poolAddress);
-        address bribeAddress = voter.bribes(gaugeAddress);
-        address[]
-            memory _bribeTokensAddresses = tokensForBribe(
-                bribeAddress
-            );
-        if (_bribeTokensAddresses.length < 2) {
-            _bribeTokensAddresses = new address[](2);
-            _bribeTokensAddresses[0] = token0Address;
-            _bribeTokensAddresses[1] = token1Address;
+    /**
+    * @notice returns all Ramses pools that have active gauges
+    */
+    function allActivePools() public view returns (address[] memory pools) {
+        uint len = voter.length();
+        pools = new address[](len);
+
+        for(uint i; i < len; ++i) {
+            pools[i] = voter.pools(i);
         }
-        return
-            IRamsesLens.Pool({
-                id: poolAddress,
-                symbol: pool.symbol(),
-                stable: pool.stable(),
-                token0Address: token0Address,
-                token1Address: token1Address,
-                gaugeAddress: gaugeAddress,
-                bribeAddress: bribeAddress,
-                bribeTokensAddresses: _bribeTokensAddresses,
-                fees: pool.fees()
-            });
     }
 
-    //@notice Returns useful information for all pools.
-    function poolsInfo() external view returns (IRamsesLens.Pool[] memory) {
-        address[] memory _poolsAddresses = poolsAddresses();
-        IRamsesLens.Pool[] memory pools = new IRamsesLens.Pool[](
-            _poolsAddresses.length
+    /**
+    * @notice returns the gauge address for a pool
+    * @param pool pool address to check
+    */
+    function gaugeForPool(address pool) public view returns (address gauge) {
+        gauge = voter.gauges(pool);
+    }
+
+    /**
+    * @notice returns the feeDistributor address for a pool
+    * @param pool pool address to check
+    */
+    function feeDistributorForPool(address pool) public view returns (address feeDistributor) {
+        address gauge = gaugeForPool(pool);
+        feeDistributor = voter.feeDistributers(gauge);
+    }
+
+    /**
+    * @notice returns current fee rate of a ramses pool
+    * @param pool pool address to check
+    */
+    function pairBips(address pool) public view returns (uint bps) {
+        bps = IPairFactory(poolFactory()).pairFee(pool);
+    }
+
+    /**
+    * @notice returns useful information for a pool
+    * @param pool pool address to check
+    */
+    function poolInfo(address pool) public view returns (Pool memory _poolInfo) {
+        IPair pair = IPair(pool);
+        _poolInfo.id = pool;
+        _poolInfo.symbol = pair.symbol();
+        (_poolInfo.token0, _poolInfo.token1) = pair.tokens();
+        _poolInfo.gauge = gaugeForPool(pool);
+        _poolInfo.feeDistributor = feeDistributorForPool(pool);
+        _poolInfo.pairFees = pair.fees();
+        _poolInfo.pairBps = pairBips(pool);
+    }
+
+    /**
+    * @notice returns useful information for all Ramses pools
+    */
+    function allPoolsInfo() public view returns (Pool[] memory _poolsInfo) {
+        address[] memory pools = allPools();
+        uint len = pools.length;
+
+        _poolsInfo = new Pool[](len);
+        for(uint i; i < len; ++i) {
+            _poolsInfo[i] = poolInfo(pools[i]);
+        }
+    }
+    
+    /**
+    * @notice returns the gauge address for all active pairs
+    */
+    function allGauges() public view returns (address[] memory gauges) {
+        address[] memory pools = allActivePools();
+        uint len = pools.length;
+        gauges = new address[](len);
+
+        for(uint i; i < len; ++i) {
+            gauges[i] = gaugeForPool(pools[i]);
+        }
+    }
+
+    /**
+    * @notice returns the feeDistributor address for all active pairs
+    */
+    function allFeeDistributors() public view returns (address[] memory feeDistributors) {
+        address[] memory pools = allActivePools();
+        uint len = pools.length;
+        feeDistributors = new address[](len);
+
+        for(uint i; i < len; ++i) {
+            feeDistributors[i] = feeDistributorForPool(pools[i]);
+        }
+    }
+
+    /**
+    * @notice returns all reward tokens for the fee distributor of a pool
+    * @param pool pool address to check
+    */
+    function bribeRewardsForPool(address pool) public view returns (address[] memory rewards) {
+        IFeeDistributor feeDist = IFeeDistributor(feeDistributorForPool(pool));
+        rewards = feeDist.getRewardTokens();
+    }
+
+    /**
+    * @notice returns all reward tokens for the gauge of a pool
+    * @param pool pool address to check
+    */
+    function gaugeRewardsForPool(address pool) public view returns (address[] memory rewards) {
+        IGauge gauge = IGauge(gaugeForPool(pool));
+        if (address(gauge) == address(0)) return rewards;
+
+        uint len = gauge.rewardsListLength();
+        rewards = new address[](len);
+        for(uint i; i < len; ++i) {
+            rewards[i] = gauge.rewards(i);
+        }
+    }
+
+    /**
+     * @notice returns gauge staking data of a user
+     * @dev derivedBalance is taken from `derivedBalances` in gauge
+     * @param user the account address of the user to check
+     * @param pool the pool address
+     */
+    function stakingPositionOf(
+        address user,
+        address pool
+    ) public view returns (userGaugeRewardData memory rewardsData) {
+        IGauge gauge = IGauge(gaugeForPool(pool));
+        if (address(gauge) == address(0)) {
+            return rewardsData;
+        }
+
+        address[] memory rewards = gaugeRewardsForPool(pool);
+        uint len = rewards.length;
+
+        rewardsData.gauge = address(gauge);
+        rewardsData.balance = gauge.balanceOf(user);
+        rewardsData.derivedBalance = gauge.derivedBalances(user);
+        userGaugeTokenData[] memory _userRewards = new userGaugeTokenData[](len);
+        
+        for (uint i; i < len; ++i) {
+            _userRewards[i].token = rewards[i];
+            _userRewards[i].earned = gauge.earned(rewards[i], user);
+        }
+        rewardsData.userRewards = _userRewards;
+    }
+
+    /**
+     * @notice returns staking data of a user for multiple pools
+     * @param user the account address of the user to check
+     * @param pools array of pool addresses
+     */
+    function stakingPositionsOf(
+        address user,
+        address[] memory pools
+    ) public view returns (userGaugeRewardData[] memory rewardsData) {
+        uint len = pools.length;
+        rewardsData = new userGaugeRewardData[](len);
+
+        for (uint i; i < len; ++i) {
+            rewardsData[i] = stakingPositionOf(user, pools[i]);
+        }
+    }
+
+    /**
+     * @notice returns staking data of all a users positions
+     * @dev this is a brute force method, it iterates all pools and checks if balance or rewards > 0. It can run out of gas
+     * @dev it is recommended to use `stakingPositionsOf()` if pools positions are already known
+     * @param user the account address of the user to check
+     */
+    function allStakingPositionsOf(
+        address user
+    ) public view returns (userGaugeRewardData[] memory rewardsData) {
+        address[] memory pools = allActivePools();
+        uint len = pools.length;
+        userGaugeRewardData[] memory _rewardsData = stakingPositionsOf(
+            user,
+            pools
         );
-        for (
-            uint256 poolIndex;
-            poolIndex < _poolsAddresses.length;
-            ++poolIndex
-        ) {
-            address poolAddress = _poolsAddresses[poolIndex];
-            IRamsesLens.Pool memory _poolInfo = poolInfo(poolAddress);
-            pools[poolIndex] = _poolInfo;
-        }
-        return pools;
-    }
 
-    //@notice returns all existing gauges.
-    function gaugesAddresses() public view returns (address[] memory) {
-        address[] memory _poolsAddresses = poolsAddresses();
-        address[] memory _gaugesAddresses = new address[](
-            _poolsAddresses.length
-        );
-        for (
-            uint256 poolIndex;
-            poolIndex < _poolsAddresses.length;
-            ++poolIndex
-        ) {
-            address poolAddress = _poolsAddresses[poolIndex];
-            address gaugeAddress = voter.gauges(poolAddress);
-            _gaugesAddresses[poolIndex] = gaugeAddress;
-        }
-        return _gaugesAddresses;
-    }
-
-    //@notice returns all existing bribe addresses.
-    function bribesAddresses() public view returns (address[] memory) {
-        address[] memory _gaugesAddresses = gaugesAddresses();
-        address[] memory _bribesAddresses = new address[](
-            _gaugesAddresses.length
-        );
-        for (uint256 gaugeIdx; gaugeIdx < _gaugesAddresses.length; ++gaugeIdx) {
-            address gaugeAddress = _gaugesAddresses[gaugeIdx];
-            address bribeAddress = voter.bribes(gaugeAddress);
-            _bribesAddresses[gaugeIdx] = bribeAddress;
-        }
-        return _bribesAddresses;
-    }
-
-    //@notice Returns the current bribe tokens for `bribeAddress`.
-    function tokensForBribe(address bribeAddress)
-        public
-        view
-        returns (address[] memory)
-    {
-        uint256 bribeTokensLength = IFeeDistributor(bribeAddress).getRewardTokens().length;
-        address[] memory _bribeTokensAddresses = new address[](
-            bribeTokensLength
-        );
-        for (
-            uint256 bribeTokenIdx;
-            bribeTokenIdx < bribeTokensLength;
-             ++bribeTokenIdx
-        ) {
-            address bribeTokenAddress = IFeeDistributor(bribeAddress).rewards(
-                bribeTokenIdx
-            );
-            _bribeTokensAddresses[bribeTokenIdx] = bribeTokenAddress;
-        }
-        return _bribeTokensAddresses;
-    }
-
-    //@notice Returns all LP balances of `accountAddress` with support for batching by pool index.
-    function poolsPositionsOf(
-        address accountAddress,
-        uint256 startIndex,
-        uint256 endIndex
-    ) public view returns (IRamsesLens.PositionPool[] memory) {
-        uint256 _poolsLength = poolsLength();
-        IRamsesLens.PositionPool[]
-            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
-                _poolsLength
-            );
-        uint256 positionsLength;
-        endIndex = Math.min(endIndex, _poolsLength);
-        for (uint256 poolIndex = startIndex; poolIndex < endIndex; ++poolIndex) {
-            
-            address poolAddress = voter.pools(poolIndex);
-            uint256 balanceOf = IPair(poolAddress).balanceOf(
-                accountAddress
-            );
-            if (balanceOf > 0) {
-                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
-                    id: poolAddress,
-                    balanceOf: balanceOf
-                });
-                positionsLength++;
+        uint x;
+        for (uint i; i < len; ++i) {
+            if (_rewardsData[i].userRewards.length > 0) {
+                if (
+                    _rewardsData[i].balance > 0 ||
+                    _rewardsData[i].userRewards[0].earned > 0
+                ) {
+                    // only checks ram
+                    ++x;
+                }
             }
         }
-
-        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
-        assembly {
-            mstore(add(encodedPositions, 0x40), positionsLength)
-        }
-        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
-    }
-
-    //@notice Returns all LP balances of `accountAddress`.
-    function poolsPositionsOf(address accountAddress)
-        public
-        view
-        returns (IRamsesLens.PositionPool[] memory)
-    {
-        uint256 _poolsLength = poolsLength();
-        IRamsesLens.PositionPool[]
-            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
-                _poolsLength
-            );
-
-        uint256 positionsLength;
-
-        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
-            address poolAddress = voter.pools(poolIndex);
-            uint256 balanceOf = IPair(poolAddress).balanceOf(
-                accountAddress
-            );
-            if (balanceOf > 0) {
-                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
-                    id: poolAddress,
-                    balanceOf: balanceOf
-                });
-                positionsLength++;
+        rewardsData = new userGaugeRewardData[](x);
+        uint j;
+        for (uint i; i < len; ++i) {
+            if (_rewardsData[i].userRewards.length > 0) {
+                if (
+                    _rewardsData[i].balance > 0 ||
+                    _rewardsData[i].userRewards[0].earned > 0
+                ) {
+                    // only checks ram
+                    rewardsData[j] = _rewardsData[i];
+                    ++j;
+                }
             }
         }
-
-        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
-        assembly {
-            mstore(add(encodedPositions, 0x40), positionsLength)
-        }
-        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
     }
 
-    //@notice Returns all staked lp's of `accountAddress`.
-    function gaugesPositionsOf(address accountAddress) public view returns (IRamsesLens.PositionPool[] memory) {
+    /**
+    * @notice returns all token id's of a user
+    * @param user account address to check
+    */
+    function veNFTsOf(address user) public view returns (uint[] memory NFTs) {
+        uint len = ve.balanceOf(user);
+        NFTs = new uint[](len);
 
-        uint256 _poolsLength = poolsLength();
-        IRamsesLens.PositionPool[]
-            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
-                _poolsLength
-            );
-
-        uint256 positionsLength;
-
-        for (uint256 poolIndex; poolIndex < _poolsLength; ++poolIndex) {
-            address poolAddress = voter.pools(poolIndex);
-            address gaugeAddress = voter.gauges(poolAddress);
-            uint256 balanceOf = IGauge(gaugeAddress).balanceOf(
-                accountAddress
-            );
-            if (balanceOf > 0) {
-                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
-                    id: poolAddress,
-                    balanceOf: balanceOf
-                });
-                ++positionsLength;
-            }
+        for(uint i; i < len; ++i) {
+            NFTs[i] = ve.tokenOfOwnerByIndex(user, i);
         }
-
-        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
-        assembly {
-            mstore(add(encodedPositions, 0x40), positionsLength)
-        }
-        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
     }
 
-    //@notice Returns all staked lp's of `accountAddress` with support for batching by pool index.
-    function gaugesPositionsOf(
-        address accountAddress,
-        uint256 startIndex,
-        uint256 endIndex
-    ) public view returns (IRamsesLens.PositionPool[] memory) {
-        uint256 _poolsLength = poolsLength();
-        IRamsesLens.PositionPool[]
-            memory _poolsPositionsOf = new IRamsesLens.PositionPool[](
-                _poolsLength
-            );
-        uint256 positionsLength;
-        endIndex = Math.min(endIndex, _poolsLength);
-        for (uint256 poolIndex = startIndex; poolIndex < endIndex; ++poolIndex) {
-            
-            address poolAddress = voter.pools(poolIndex);
-            address gaugeAddress = voter.gauges(poolAddress);
-            uint256 balanceOf = IGauge(gaugeAddress).balanceOf(
-                accountAddress
-            );
-            if (balanceOf > 0) {
-                _poolsPositionsOf[positionsLength] = IRamsesLens.PositionPool({
-                    id: poolAddress,
-                    balanceOf: balanceOf
-                });
-                positionsLength++;
-            }
+    /**
+     * @notice returns bribes data of a token id per pool
+     * @param tokenId the veNFT token id to check
+     * @param pool the pool address
+     */
+    function bribesPositionOf(
+        uint tokenId,
+        address pool
+    ) public view returns (userFeeDistData memory rewardsData) {
+        IFeeDistributor feeDist = IFeeDistributor(feeDistributorForPool(pool));
+        if (address(feeDist) == address(0)) {
+            return rewardsData;
         }
 
-        bytes memory encodedPositions = abi.encode(_poolsPositionsOf);
-        assembly {
-            mstore(add(encodedPositions, 0x40), positionsLength)
+        address[] memory rewards = bribeRewardsForPool(pool);
+        uint len = rewards.length;
+
+        rewardsData.feeDistributor = address(feeDist);
+        userBribeTokenData[] memory _userRewards = new userBribeTokenData[](len);
+        
+        for (uint i; i < len; ++i) {
+            _userRewards[i].token = rewards[i];
+            _userRewards[i].earned = feeDist.earned(rewards[i], tokenId);
         }
-        return abi.decode(encodedPositions, (IRamsesLens.PositionPool[]));
+        rewardsData.bribeData = _userRewards;
     }
 
+    /**
+    * @notice returns bribes data of a token id for multiple pools
+    * @param tokenId the veNFT token id to check
+    * @param pools pools addresses
+    */
+    function bribesPositionsOf(uint tokenId, address[] memory pools) public view returns (userFeeDistData[] memory rewardsData) {
+        uint len = pools.length;
+        rewardsData = new userFeeDistData[](len);
 
-    //@notice returns all veNFT id's of `accountAddress`.
-    function veTokensIdsOf(address accountAddress)
+        for(uint i; i < len; ++i) {
+            rewardsData[i] = bribesPositionOf(tokenId, pools[i]);
+        }
+    }
+
+    /**
+    * @notice returns bribes data of a user for multiple pools
+    * @notice not removing 0 values here
+    * @param user account address of the user
+    * @param pools pools addresses
+    */
+    function bribesPositionsOf(address user, address[] memory pools) public view returns (userBribeData[] memory rewardsData) {
+        uint[] memory ids = veNFTsOf(user);
+        rewardsData = new userBribeData[](ids.length);
+
+        for(uint i; i < ids.length; ++i) {
+            rewardsData[i].tokenId = ids[i];
+            rewardsData[i].feeDistRewards = bribesPositionsOf(ids[i], pools);
+        }
+    }
+
+    /**
+    * @notice returns all bribes positions of a user
+    * @notice not removing 0 values here, costs too much gas (many nodes limit gas for read functions)
+    * @param user account address of the user
+    */
+    function allBribesPositions(address user) public view returns (userBribeData[] memory rewardsData) {
+        address[] memory pools = allActivePools();
+        uint[] memory ids = veNFTsOf(user);
+        rewardsData = new userBribeData[](ids.length);
+        
+        for(uint i; i < ids.length; ++i) {
+            rewardsData[i].tokenId = ids[i];
+            rewardsData[i].feeDistRewards = bribesPositionsOf(ids[i], pools);
+        }
+    }
+
+    /**
+     * @notice returns gauge reward data for a Ramses pool
+     * @param pool Ramses pool address
+     */
+    function poolRewardsData(
+        address pool
+    ) public view returns (gaugeRewardsData memory rewardData) {
+        address gauge = gaugeForPool(pool);
+        if (gauge == address(0)) {
+            return rewardData;
+        }
+
+        address[] memory rewards = gaugeRewardsForPool(pool);
+        uint len = rewards.length;
+        tokenRewardData[] memory _rewardData = new tokenRewardData[](len);
+
+        for (uint i; i < len; ++i) {
+            _rewardData[i].token = rewards[i];
+            _rewardData[i].rewardRate = IGauge(gauge).rewardRate(rewards[i]);
+        }
+        rewardData.gauge = gauge;
+        rewardData.rewardData = _rewardData;
+    }
+
+    /**
+     * @notice returns gauge reward data for multiple ramses pools
+     * @param pools Ramses pools addresses
+     */
+    function poolsRewardsData(
+        address[] memory pools
+    ) public view returns (gaugeRewardsData[] memory rewardsData) {
+        uint len = pools.length;
+        rewardsData = new gaugeRewardsData[](len);
+
+        for (uint i; i < len; ++i) {
+            rewardsData[i] = poolRewardsData(pools[i]);
+        }
+    }
+
+    /**
+     * @notice returns gauge reward data for all ramses pools
+     */
+    function allPoolsRewardData()
         public
         view
-        returns (uint256[] memory)
+        returns (gaugeRewardsData[] memory rewardsData)
     {
-        uint256 veBalanceOf = ve.balanceOf(accountAddress);
-        uint256[] memory _veTokensOf = new uint256[](veBalanceOf);
+        address[] memory pools =  allActivePools();
+        rewardsData = poolsRewardsData(pools);
+    }
 
-        for (uint256 tokenIdx; tokenIdx < veBalanceOf; ++tokenIdx) {
-            uint256 tokenId = ve.tokenOfOwnerByIndex(accountAddress, tokenIdx);
-            _veTokensOf[tokenIdx] = tokenId;
+    /**
+    * @notice returns veNFT lock data for a token id
+    * @param user account address of the user
+    */
+    function vePositionsOf(address user) public view returns (userVeData[] memory veData) {
+        uint[] memory ids = veNFTsOf(user);
+        uint len = ids.length;
+        veData = new userVeData[](len);
+
+        for(uint i; i < len; ++i) {
+            veData[i].tokenId = ids[i];
+            IVotingEscrow.LockedBalance memory _locked = ve.locked(ids[i]);
+            veData[i].lockedAmount = uint(int(_locked.amount));
+            veData[i].lockEnd = _locked.end;
+            veData[i].votingPower = ve.balanceOfNFT(ids[i]);
         }
-        return _veTokensOf;
     }
 
-    //@notice Returns gauge address of `poolAddress`
-    function gaugeForPool(address poolAddress)
-        external
-        view
-        returns (address)
-    {
-        return voter.gauges(poolAddress);
+    /**
+    * @notice returns all reward info for a user
+    * @notice this is a very gas heavy function and may not be as efficient or quick to call
+    * @notice very likely to get an evm timeout with this function
+    * @param user the account address of the user
+    */
+    function userInfo(address user) public view returns (userData memory _userInfo) {
+        _userInfo.gaugeRewards = allStakingPositionsOf(user);
+        _userInfo.bribeRewards = allBribesPositions(user);
+        _userInfo.veNFTData = vePositionsOf(user);
     }
-
-    //@notice returns bribe address of `poolAddress
-    function bribeForPool(address poolAddress)
-        public
-        view
-        returns (address)
-    {
-        address gaugeAddress = voter.gauges(poolAddress);
-        address bribeAddress = voter.bribes(gaugeAddress);
-        return bribeAddress;
-    }
-
-    //@notice Returns bribe tokens by `poolAddress`
-    function bribeTokensForPool(address poolAddress)
-        public
-        view
-        returns (address[] memory)
-    {
-        address bribeAddress = bribeForPool(poolAddress);
-        return tokensForBribe(bribeAddress);
-    }
-
-    //@notice Returns the amount of bribes earned by `tokenId` for `poolAddress`.
-    function bribesPositionsOf(
-        address poolAddress,
-        uint256 tokenId
-    ) public view returns (IRamsesLens.PositionBribe[] memory) {
-        address bribeAddress = bribeForPool(poolAddress);
-        address[]
-            memory bribeTokensAddresses = tokensForBribe(
-                bribeAddress
-            );
-        IRamsesLens.PositionBribe[]
-            memory _bribesPositionsOf = new IRamsesLens.PositionBribe[](
-                bribeTokensAddresses.length
-            );
-        uint256 currentIdx;
-        for (
-            uint256 bribeTokenIdx;
-            bribeTokenIdx < bribeTokensAddresses.length;
-            ++bribeTokenIdx
-        ) {
-            address bribeTokenAddress = bribeTokensAddresses[bribeTokenIdx];
-            uint256 earned = IFeeDistributor(bribeAddress).earned(
-                bribeTokenAddress,
-                tokenId
-            );
-            if (earned > 0) {
-                _bribesPositionsOf[currentIdx] = IRamsesLens.PositionBribe({
-                    bribeTokenAddress: bribeTokenAddress,
-                    earned: earned
-                });
-                currentIdx++;
-            }
-        }
-        bytes memory encodedBribes = abi.encode(_bribesPositionsOf);
-        assembly {
-            mstore(add(encodedBribes, 0x40), currentIdx)
-        }
-        IRamsesLens.PositionBribe[] memory filteredBribes = abi.decode(
-            encodedBribes,
-            (IRamsesLens.PositionBribe[])
-        );
-        return filteredBribes;
-    }
-
-    //@notice Returns the amount of bribes earned by `accountAddress` for `poolAddress`.
-    function bribesPositionsOf(address accountAddress, address poolAddress)
-        public
-        view
-        returns (IRamsesLens.PositionBribesByTokenId[] memory)
-    {
-     
-        uint256[] memory veTokensIds = veTokensIdsOf(accountAddress);
-        IRamsesLens.PositionBribesByTokenId[]
-            memory _bribePositionsOf = new IRamsesLens.PositionBribesByTokenId[](
-                veTokensIds.length
-            );
-
-        uint256 currentIdx;
-        for (
-            uint256 veTokenIdIdx;
-            veTokenIdIdx < veTokensIds.length;
-            ++veTokenIdIdx
-        ) {
-            uint256 tokenId = veTokensIds[veTokenIdIdx];
-            _bribePositionsOf[currentIdx] = IRamsesLens
-                .PositionBribesByTokenId({
-                    tokenId: tokenId,
-                    bribes: bribesPositionsOf(
-                        poolAddress,
-                        tokenId
-                    )
-                });
-            currentIdx++;
-        }
-        return _bribePositionsOf;
-    }
-
-    //@notice Returns all veNFT positions of `accountAddress`
-    function vePositionsOf(address accountAddress)
-        public
-        view
-        returns (IRamsesLens.PositionVe[] memory)
-    {
-        uint256 veBalanceOf = ve.balanceOf(accountAddress);
-        IRamsesLens.PositionVe[]
-            memory _vePositionsOf = new IRamsesLens.PositionVe[](veBalanceOf);
-
-        for (uint256 tokenIdx; tokenIdx < veBalanceOf; ++tokenIdx) {
-            uint256 tokenId = ve.tokenOfOwnerByIndex(accountAddress, tokenIdx);
-            uint256 balanceOf = ve.balanceOfNFT(tokenId);
-            uint256 locked = ve.locked(tokenId);
-            _vePositionsOf[tokenIdx] = IRamsesLens.PositionVe({
-                tokenId: tokenId,
-                balanceOf: balanceOf,
-                locked: locked
-            });
-        }
-        return _vePositionsOf;
-    }
+    
 }
