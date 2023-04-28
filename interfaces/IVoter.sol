@@ -1,31 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.17;
+pragma solidity 0.8.19;
 
 interface IVoter {
-    function isWhitelisted(address) external view returns (bool);
-
-    function length() external view returns (uint256);
-
-    function pools(uint256) external view returns (address);
-
-    function gauges(address) external view returns (address);
-
-    function bribes(address) external view returns (address);
-
+    function _ve() external view returns (address);
     function factory() external view returns (address);
-
     function gaugefactory() external view returns (address);
-
-    function vote(
-        uint256,
-        address[] memory,
-        int256[] memory
-    ) external;
-
-    function updateFor(address[] memory _gauges) external;
-
-    function claimRewards(address[] memory _gauges, address[][] memory _tokens)
-        external;
-
-    function distribute(address _gauge) external;
+    function gauges(address pool) external view returns (address);
+    function feeDistributers(address pool) external view returns (address);
+    function length() external view returns (uint256);
+    function pools(uint) external view returns (address);
+    function minter() external view returns (address);
 }
