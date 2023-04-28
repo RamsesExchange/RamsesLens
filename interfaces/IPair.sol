@@ -1,20 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.17;
+pragma solidity ^0.8.13;
 
 interface IPair {
-    function token0() external view returns (address);
-
-    function token1() external view returns (address);
-
-    function fees() external view returns (address);
-
-    function stable() external view returns (bool);
-
+    function tokens() external view returns (address, address);
     function symbol() external view returns (string memory);
-
-    function approve(address, uint256) external;
-
-    function transfer(address, uint256) external;
-
-    function balanceOf(address) external view returns (uint256);
+    function fees() external view returns (address);
 }
